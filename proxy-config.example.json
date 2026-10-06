@@ -1,0 +1,12 @@
+{
+  "cameras": [
+    {
+      "id": "camera-1",
+      "name": "Camera 1",
+      "host": "192.0.2.10",
+      "onvifPort": 8080,
+      "rtspPort": 8554,
+      "osd": { "title": "Camera 1", "timezone": "Etc/UTC" }
+    }
+  ]
+}

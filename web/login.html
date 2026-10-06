@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign In / Cameras</title>
+  <style>
+    @font-face {
+      font-family: Plex;
+      src: url('/font.woff2') format('woff2');
+      font-display: swap;
+    }
+
+    :root {
+      color-scheme: light;
+      --paper: #f3f6f4;
+      --ink: #192b2a;
+      --surface: #fff;
+      --line: #d6dfdc;
+      --green: #147b62;
+      --on-green: #fff;
+      --red: #b04440;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        color-scheme: dark;
+        --paper: #151918;
+        --ink: #e5eeea;
+        --surface: #202625;
+        --line: #404d46;
+        --green: #6bd4b1;
+        --on-green: #10271f;
+        --red: #ff9990;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+      letter-spacing: 0;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100svh;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background: var(--paper);
+      color: var(--ink);
+      font: 15px/1.5 Plex, sans-serif;
+    }
+
+    main {
+      width: 100%;
+      max-width: 320px;
+    }
+
+    h1 {
+      font-size: 24px;
+      font-weight: 400;
+      margin: 0 0 24px;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 6px;
+    }
+
+    input,
+    button {
+      width: 100%;
+      min-height: 44px;
+      font: inherit;
+      border-radius: 4px;
+    }
+
+    input {
+      padding: 10px;
+      border: 1px solid var(--line);
+      background: var(--surface);
+      color: var(--ink);
+    }
+
+    button {
+      margin-top: 16px;
+      border: 0;
+      background: var(--green);
+      color: var(--on-green);
+      cursor: pointer;
+    }
+
+    :focus-visible {
+      outline: 3px solid var(--green);
+      outline-offset: 3px;
+    }
+
+    .error {
+      color: var(--red);
+      font-size: 13px;
+    }
+  </style>
+</head>
+
+<body>
+  <main>
+    <h1>Cameras</h1>
+    <form action="/login" method="post">
+      <label for="password">Password</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" required maxlength="256"
+        autofocus>
+      <!--LOGIN_ERROR-->
+      <button type="submit">Sign in</button>
+    </form>
+  </main>
+</body>
+
+</html>

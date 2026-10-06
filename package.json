@@ -1,0 +1,31 @@
+{
+  "name": "cctvspoofer",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Password-protected ONVIF/RTSP camera dashboard with coordinated recording and replay",
+  "type": "module",
+  "scripts": {
+    "inspect": "node --env-file-if-exists=.env src/cameras.js inspect",
+    "proxy": "node --env-file-if-exists=.env src/proxy.js",
+    "start": "node --env-file-if-exists=.env src/proxy-fleet.js",
+    "env:init": "node scripts/bridge.mjs --init-env",
+    "bridge": "node --env-file=.env scripts/bridge.mjs",
+    "test:media": "PROXY_MEDIA_TEST=1 node --test tests/proxy.test.js",
+    "test:browser": "node --env-file-if-exists=.env tests/browser-check.mjs",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@fontsource/ibm-plex-sans": "^5.3.0",
+    "fast-xml-parser": "^5.11.2",
+    "hls.js": "^1.7.3",
+    "lucide": "^1.52.0",
+    "onvif": "^0.8.3",
+    "tough-cookie": "^6.0.2"
+  },
+  "devDependencies": {
+    "playwright": "^1.63.0"
+  }
+}

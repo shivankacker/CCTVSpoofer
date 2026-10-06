@@ -1,0 +1,685 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Camera / Live Output</title>
+  <style>
+    @font-face {
+      font-family: Plex;
+      src: url('/font.woff2') format('woff2');
+      font-weight: 400;
+      font-display: swap;
+    }
+
+    :root {
+      color-scheme: light;
+      --ink: #192b2a;
+      --muted: #657371;
+      --line: #d6dfdc;
+      --paper: #f3f6f4;
+      --surface: #fff;
+      --hover: #e4eee8;
+      --green: #147b62;
+      --on-green: #fff;
+      --red: #b04440;
+      --amber: #996014;
+      --focus: #428fcb;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        color-scheme: dark;
+        --ink: #e5eeea;
+        --muted: #a6b5ae;
+        --line: #404d46;
+        --paper: #151918;
+        --surface: #202625;
+        --hover: #2f3b35;
+        --green: #6bd4b1;
+        --on-green: #10271f;
+        --red: #ff9990;
+        --amber: #eabc72;
+        --focus: #80bfff;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+      letter-spacing: 0;
+    }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--paper);
+      font: 15px/1.5 Plex, 'Avenir Next', sans-serif;
+    }
+
+    button,
+    input,
+    select {
+      font: inherit;
+    }
+
+    .quality-controls {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: end;
+      gap: 12px;
+      padding: 0 0 16px;
+    }
+
+    .quality-controls label {
+      display: grid;
+      gap: 4px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .quality-controls select {
+      min-height: 40px;
+      min-width: 100px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: var(--surface);
+      color: var(--ink);
+      padding: 6px 10px;
+    }
+
+    .apply-quality {
+      height: 40px;
+      padding: 0 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      color: var(--ink);
+    }
+
+    .apply-quality svg {
+      width: 16px;
+      height: 16px;
+    }
+
+    .settings-state {
+      font-size: 12px;
+      color: var(--muted);
+      align-self: center;
+    }
+
+    .resources {
+      flex: 0 1 340px;
+      min-width: 0;
+      margin-left: 8px;
+    }
+
+    .replay-controls {
+      margin-bottom: 16px;
+    }
+
+    .replay-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .record-button,
+    .stop-button {
+      height: 52px;
+      padding: 12px 16px;
+      border-radius: 4px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+    }
+
+    .record-button {
+      position: relative;
+      overflow: hidden;
+      width: 240px;
+      background: var(--green);
+      border: 0;
+      color: var(--on-green);
+      font-size: 16px;
+    }
+
+    .record-button:disabled {
+      opacity: 1;
+      cursor: default;
+    }
+
+    .stop-button {
+      background: var(--surface);
+      color: var(--red);
+      border: 1px solid var(--line);
+    }
+
+    .replay-actions svg {
+      width: 18px;
+      height: 18px;
+      flex-shrink: 0;
+    }
+
+    .replay-clock {
+      margin-left: auto;
+      font-size: 16px;
+      font-variant-numeric: tabular-nums;
+      line-height: 1.2;
+    }
+
+    .replay-summary {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-top: 8px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .replay-summary .signal {
+      font-size: inherit;
+    }
+
+    #replay-progress {
+      appearance: none;
+      position: absolute;
+      inset: auto 0 0;
+      display: block;
+      width: 100%;
+      height: 3px;
+      border: 0;
+      background: transparent;
+      color: var(--on-green);
+    }
+
+    #replay-progress::-webkit-progress-bar {
+      background: transparent;
+    }
+
+    #replay-progress::-webkit-progress-value {
+      background: var(--on-green);
+    }
+
+    #replay-progress::-moz-progress-bar {
+      background: var(--on-green);
+    }
+
+    .output-mode {
+      color: var(--green);
+      font-size: 13px;
+    }
+
+    .output-mode[data-replay="true"] {
+      color: var(--amber);
+    }
+
+    @media (max-width: 520px) {
+      .record-button {
+        flex: 1;
+        min-width: 0;
+      }
+    }
+
+    .resource-grid {
+      display: grid;
+      gap: 8px;
+    }
+
+    .resource-item {
+      display: grid;
+      grid-template-columns: 50px 64px minmax(0, 1fr);
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .resource-item strong {
+      font-weight: 400;
+      font-variant-numeric: tabular-nums;
+      text-align: right;
+      overflow-wrap: anywhere;
+    }
+
+    .resource-meter {
+      appearance: none;
+      width: 100%;
+      height: 4px;
+      display: block;
+      margin: 0;
+      border: 0;
+      border-radius: 2px;
+      overflow: hidden;
+      background: var(--line);
+      color: var(--green);
+    }
+
+    .resource-meter::-webkit-progress-bar {
+      background: var(--line);
+    }
+
+    .resource-meter::-webkit-progress-value {
+      background: var(--green);
+    }
+
+    .resource-meter::-moz-progress-bar {
+      background: var(--green);
+    }
+
+    .encode-stats {
+      font-size: 12px;
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .resource-detail,
+    .resource-scope {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
+    }
+
+    .encode-stats {
+      display: block;
+      margin: 6px 0 0;
+      min-height: 18px;
+    }
+
+    .resource-alert {
+      color: var(--red);
+    }
+
+    @media (max-width: 740px) {
+      .resources {
+        flex-basis: 100%;
+        margin-left: 0;
+      }
+
+      .resource-item {
+        grid-template-columns: 50px 48px minmax(0, 1fr);
+      }
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    button:disabled {
+      cursor: wait;
+      opacity: .5;
+    }
+
+    button:focus-visible,
+    select:focus-visible {
+      outline: 3px solid var(--focus);
+      outline-offset: 4px;
+    }
+
+    main {
+      max-width: 1480px;
+      margin: auto;
+      padding: 30px 40px 45px;
+    }
+
+    .signal {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      white-space: nowrap;
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #bd8230;
+    }
+
+    .signal.live .dot {
+      background: var(--green);
+    }
+
+    .workspace {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 20px;
+      align-items: start;
+    }
+
+    .camera-row {
+      padding: 18px 0 28px;
+      margin-top: 16px;
+    }
+
+    .camera-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 20px;
+      margin-bottom: 16px;
+    }
+
+    .camera-name {
+      display: flex;
+      align-items: baseline;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .camera-host,
+    .output-meta {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .controls {
+      display: flex;
+      align-items: center;
+      gap: 15px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    figure {
+      margin: 0;
+      min-width: 0;
+    }
+
+    figcaption {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      padding-bottom: 8px;
+      font-size: 13px;
+    }
+
+    .feed-state {
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .screen {
+      aspect-ratio: 16 / 9;
+      position: relative;
+      background: #142120;
+      overflow: hidden;
+    }
+
+    video {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+
+    .waiting {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-content: center;
+      text-align: center;
+      color: #d6e5df;
+      gap: 12px;
+      background: #142120;
+    }
+
+    .waiting[hidden] {
+      display: none;
+    }
+
+    .waiting svg {
+      margin: auto;
+      width: 28px;
+      height: 28px;
+    }
+
+    h2 {
+      margin: 0;
+      font-size: 17px;
+      font-weight: 400;
+    }
+
+    .error {
+      color: var(--red);
+      font-size: 13px;
+      margin: 8px 0;
+    }
+
+    .error:empty {
+      display: none;
+    }
+
+    .endpoints {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 20px;
+      margin-top: 6px;
+    }
+
+    .endpoint {
+      display: grid;
+      grid-template-columns: 45px minmax(0, 1fr) 32px;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 0;
+    }
+
+    .endpoint span {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    code {
+      font-family: 'SFMono-Regular', Consolas, monospace;
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }
+
+    .icon-button {
+      display: grid;
+      place-items: center;
+      width: 32px;
+      height: 32px;
+      padding: 0;
+      border: 0;
+      border-radius: 4px;
+      background: transparent;
+      color: var(--muted);
+    }
+
+    .icon-button svg {
+      width: 15px;
+      height: 15px;
+    }
+
+    .icon-button:hover {
+      background: var(--hover);
+      color: var(--ink);
+    }
+
+    .footer {
+      margin-top: 25px;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    #notice {
+      margin-left: auto;
+      color: var(--green);
+    }
+
+    @media (max-width: 1000px) {
+      main {
+        padding: 25px 24px;
+      }
+
+      .output-meta {
+        display: none;
+      }
+    }
+
+    @media (max-width: 740px) {
+
+      .workspace,
+      .endpoints {
+        grid-template-columns: minmax(0, 1fr);
+      }
+
+      .endpoints {
+        gap: 0;
+      }
+
+      main {
+        padding: 24px 18px;
+      }
+
+      .camera-header {
+        align-items: flex-start;
+      }
+
+      .camera-name {
+        gap: 3px;
+        flex-direction: column;
+      }
+
+      .controls {
+        gap: 8px;
+      }
+
+      .controls .signal {
+        display: none;
+      }
+
+      .footer {
+        flex-wrap: wrap;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      * {
+        transition: none !important;
+      }
+    }
+  </style>
+  <script src="/vendor/hls.js" defer></script>
+  <script src="/vendor/lucide.js" defer></script>
+  <script src="/app.js" defer></script>
+</head>
+
+<body>
+  <main>
+    <p id="page-error" class="error" role="status"></p>
+    <section class="replay-controls" aria-label="Record and replay all cameras">
+      <div class="replay-actions">
+        <button id="record-button" class="record-button" aria-label="Record 2 minutes" aria-describedby="replay-state"
+          disabled>
+          <i data-lucide="circle-dot"></i><span>Record</span>
+          <time id="replay-clock" class="replay-clock" aria-label="Recording time remaining">02:00</time>
+          <progress id="replay-progress" max="120" value="0" aria-label="Recording progress"></progress>
+        </button>
+        <button id="stop-button" class="stop-button" disabled><i data-lucide="square"></i>Stop</button>
+        <section class="resources" aria-label="Server resources">
+          <span class="resource-scope" id="resource-scope">Connecting</span>
+          <div class="resource-grid">
+            <div class="resource-item">
+              <span>CPU</span><progress id="cpu-meter" class="resource-meter" max="100" value="0" aria-label="CPU usage"
+                aria-describedby="resource-scope cpu-detail"></progress>
+              <strong id="cpu-value">Sampling</strong>
+              <span class="resource-detail" id="cpu-detail"></span>
+            </div>
+            <div class="resource-item">
+              <span>Memory</span><progress id="memory-meter" class="resource-meter" max="100" value="0"
+                aria-label="Memory usage" aria-describedby="resource-scope memory-detail"></progress>
+              <strong id="memory-value">Sampling</strong>
+              <span class="resource-detail" id="memory-detail"></span>
+            </div>
+          </div>
+          <p id="resource-error" class="error" role="status"></p>
+        </section>
+      </div>
+      <div class="replay-summary">
+        <span id="replay-state" role="status">Live</span>
+        <div class="signal" id="signal"><span class="dot"></span><span id="connection">Connecting</span></div>
+        <form action="/logout" method="post" style="margin-left: auto">
+          <button class="icon-button" type="submit" aria-label="Sign out" title="Sign out"><i
+              data-lucide="log-out"></i></button>
+        </form>
+      </div>
+      <p id="replay-error" class="error" role="status"></p>
+    </section>
+    <div id="cameras"></div>
+    <div class="footer"><span id="notice" role="status"></span></div>
+  </main>
+  <template id="camera-template">
+    <section class="camera-row">
+      <div class="camera-header">
+        <div class="camera-name">
+          <h2></h2><span class="camera-host"></span>
+        </div>
+        <div class="controls"><span class="output-meta"></span>
+          <div class="signal"><span class="dot"></span><span class="connection">Connecting</span></div>
+          <span class="output-mode">Live</span>
+        </div>
+      </div>
+      <div class="quality-controls">
+        <label>Processed quality<select class="quality">
+            <option value="360p">360p</option>
+            <option value="480p">480p</option>
+            <option value="720p">720p</option>
+            <option value="1080p">1080p</option>
+          </select></label>
+        <label>Frame rate<select class="fps">
+            <option value="5">5 fps</option>
+            <option value="10">10 fps</option>
+            <option value="15">15 fps</option>
+            <option value="20">20 fps</option>
+            <option value="25">25 fps</option>
+            <option value="30">30 fps</option>
+          </select></label>
+        <button class="apply-quality" disabled><i data-lucide="check"></i>Apply</button><span class="settings-state"
+          role="status"></span>
+      </div>
+      <div class="workspace">
+        <figure data-feed="original">
+          <figcaption><span>Original preview</span><span class="feed-state">Connecting</span></figcaption>
+          <div class="screen"><video autoplay muted playsinline controls></video>
+            <div class="waiting"><i data-lucide="video"></i><span>Connecting to video</span></div>
+          </div><span class="encode-stats original-stats"></span>
+        </figure>
+        <figure data-feed="processed">
+          <figcaption><span>Processed</span><span class="feed-state">Connecting</span></figcaption>
+          <div class="screen"><video autoplay muted playsinline controls></video>
+            <div class="waiting"><i data-lucide="video"></i><span>Connecting to video</span></div>
+          </div><span class="encode-stats processed-stats"></span>
+        </figure>
+      </div>
+      <p class="error" role="status"></p>
+      <div class="endpoints">
+        <div class="endpoint"><span>Original</span><code data-url="passthrough"></code><button class="icon-button"
+            data-copy="passthrough" aria-label="Copy original RTSP URL" title="Copy original RTSP URL"><i
+              data-lucide="copy"></i></button></div>
+        <div class="endpoint"><span>RTSP</span><code data-url="rtsp"></code><button class="icon-button" data-copy="rtsp"
+            aria-label="Copy RTSP URL" title="Copy RTSP URL"><i data-lucide="copy"></i></button></div>
+        <div class="endpoint"><span>ONVIF</span><code data-url="onvif"></code><button class="icon-button"
+            data-copy="onvif" aria-label="Copy ONVIF URL" title="Copy ONVIF URL"><i data-lucide="copy"></i></button>
+        </div>
+      </div>
+    </section>
+  </template>
+</body>
+
+</html>
