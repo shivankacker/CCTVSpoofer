@@ -99,25 +99,27 @@ settings live under `rootfs/var/lib/cctvspoofer`; logs are under
 ### Direct LAN And Tailnet Access
 
 Keep the existing dashboard password. Confirm the phone's LAN and Tailscale IPv4
-addresses with `busybox ifconfig`; use the actual addresses, not these examples.
-From the repository root, stage the current web module and launcher:
+addresses with `busybox ifconfig`, then record them once in the build machine's
+private `.env` (`BRIDGE_SSH_HOST` is the phone's SSH alias):
 
-```sh
-scp scripts/phone-native.sh phone:~/cctvspoofer-native/phone-native.sh
-scp src/proxy-web.js phone:~/cctvspoofer-native/proxy-web.next.js
+```dotenv
+PHONE_LAN_IP=192.168.1.20
+PHONE_TAILSCALE_IP=100.64.0.10
 ```
 
-With recording/replay idle, the operator runs this app-only update:
+With recording/replay idle, apply them from the repository root:
 
 ```sh
-ssh -T phone 'su -c "/system/bin/sh /data/data/com.termux/files/home/cctvspoofer-native/phone-native.sh web-access 100.64.0.10 192.168.1.20"'
+npm run phone:web-access
 ```
 
-It checks authenticated replay state, backs up the environment to
+This runs the launcher's root `web-access` action over SSH. It checks
+authenticated replay state, backs up the environment to
 `rootfs/app/.env.before-web-access`, sets `WEB_LISTEN_ADDRESS=0.0.0.0` and
-`WEB_HOSTS=192.168.1.20,100.64.0.10`, installs the staged web module, and restarts
-only the fleet through its existing supervisor. Credentials, recordings, saved
-quality, and RTSP/ONVIF loopback listeners are preserved. Do not rerun `install`.
+`WEB_HOSTS=LAN_IP,TAILSCALE_IP`, and restarts only the fleet through its existing
+supervisor. Credentials, recordings, saved quality, and RTSP/ONVIF loopback
+listeners are preserved. Do not rerun `install`. If either address changes, edit
+`.env` and run the command again.
 
 The dashboard then uses `http://LAN_IP:3000` on the office LAN and
 `http://TAILSCALE_IP:3000` from tailnet devices permitted by the existing Tailscale
@@ -237,8 +239,9 @@ Before testing a reboot, be physically present with a working local unlock and
 recovery method. Confirm **Always-on VPN** is enabled for Tailscale and **Block
 connections without VPN** is off. Ensure Tailscale does not require reauthentication.
 After reboot, test SSH and both dashboard addresses from another device without
-first opening Termux. If the LAN address changes through DHCP, update `WEB_HOSTS`
-with `web-access`; reserving the existing LAN address on the router avoids this.
+first opening Termux. If the LAN address changes through DHCP, update
+`PHONE_LAN_IP` in `.env` and run `npm run phone:web-access`; reserving the
+existing LAN address on the router avoids this.
 Do not perform a remote reboot test while recovery access is unavailable.
 
 To disable future boot startup without stopping running SSH or camera processes:

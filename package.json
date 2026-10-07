@@ -10,6 +10,7 @@
     "start": "node --env-file-if-exists=.env src/proxy-fleet.js",
     "env:init": "node scripts/bridge.mjs --init-env",
     "bridge": "node --env-file=.env scripts/bridge.mjs",
+    "phone:web-access": "node --env-file=.env scripts/phone-web-access.mjs",
     "test:media": "PROXY_MEDIA_TEST=1 node --test tests/proxy.test.js",
     "test:browser": "node --env-file-if-exists=.env tests/browser-check.mjs",
     "test": "node --test"

@@ -17,6 +17,7 @@ import { createResourceMonitor } from '../src/proxy-monitor.js';
 import { get as httpGet, request as httpRequest } from 'node:http';
 import { validateCameraConfig, configureCameraEnvironment, cameraSource } from '../src/proxy-fleet.js';
 import { bridgeArguments, renderEnvironment } from '../scripts/bridge.mjs';
+import { phoneWebAccessArguments } from '../scripts/phone-web-access.mjs';
 import { parseEnv } from 'node:util';
 import { processedArguments, recordingArguments, sourceRecordingArguments } from '../src/proxy-media.js';
 import { createReplayController } from '../src/proxy-replay.js';
@@ -361,6 +362,16 @@ test('audio survives capture and stays aligned across replay loops; silent camer
   const silentOutput = join(directory, 'silent-output.mkv');
   await execute('ffmpeg', [...silentArgs.slice(0, silentArgs.lastIndexOf('-f')), '-t', '1', '-f', 'matroska', silentOutput]);
   assert.deepEqual((await inspect(silentOutput)).streams.map((stream) => stream.codec_type), ['video']);
+});
+
+test('phone web access uses the saved addresses and rejects values that could reach the remote shell', () => {
+  const environment = { BRIDGE_SSH_HOST: 'phone', PHONE_LAN_IP: '192.168.1.9', PHONE_TAILSCALE_IP: '100.94.82.112' };
+  const args = phoneWebAccessArguments(environment);
+  assert.equal(args.at(-2), 'phone');
+  assert.match(args.at(-1), / web-access 100\.94\.82\.112 192\.168\.1\.9"$/);
+  for (const change of [{ PHONE_LAN_IP: '' }, { PHONE_LAN_IP: '1.2.3.4; reboot' }, { PHONE_TAILSCALE_IP: '$(id)' }, { BRIDGE_SSH_HOST: '-oProxyCommand=x' }]) {
+    assert.throws(() => phoneWebAccessArguments({ ...environment, ...change }));
+  }
 });
 
 test('bridge forwards are local-only, use configured endpoints and reject invalid or duplicate ports', () => {

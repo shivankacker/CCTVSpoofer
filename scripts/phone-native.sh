@@ -33,7 +33,6 @@ case "$action" in
   web-access)
     require_root
     require_install
-    test -f "$base/proxy-web.next.js"
     unset LD_PRELOAD LD_LIBRARY_PATH
     chroot "$rootfs" /usr/bin/env -i PATH=/usr/local/bin:/usr/bin:/bin /usr/local/bin/node --input-type=module - "${2:?Specify the Tailscale IPv4 address}" "${3:?Specify the LAN IPv4 address}" <<'CONFIG'
 import assert from 'node:assert/strict';
@@ -80,9 +79,6 @@ try {
 }
 console.log(`Dashboard configured for http://${lanAddress}:3000 and http://${address}:3000; credentials and stream settings preserved.`);
 CONFIG
-    cp "$base/proxy-web.next.js" "$rootfs/app/src/proxy-web.js.new"
-    chmod 644 "$rootfs/app/src/proxy-web.js.new"
-    mv "$rootfs/app/src/proxy-web.js.new" "$rootfs/app/src/proxy-web.js"
     sv -w 30 restart "$service"
     ;;
   install)
