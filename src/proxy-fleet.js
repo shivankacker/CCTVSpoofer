@@ -1,9 +1,11 @@
 import { readFile } from 'node:fs/promises';
 import { isIP } from 'node:net';
+import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { environmentCredentials } from './cameras.js';
 import { authenticatedUri, selectStream } from './proxy-media.js';
 import { startProxy, settingsStore } from './proxy.js';
+import { createRecordingLibrary } from './proxy-recordings.js';
 import { createReplayController } from './proxy-replay.js';
 import { createWebServer } from './proxy-web.js';
 
@@ -57,7 +59,8 @@ export function validateCameraConfig(document, webPort = 3000) {
 
 export async function startFleet({ config, inventory, cameraCredentials, credentials,
   hostname = '127.0.0.1', listen = '127.0.0.1', webListen = '127.0.0.1', webPort = 3000,
-  settingsFile = 'stream-settings.local.json', log = console.log }) {
+  settingsFile = 'stream-settings.local.json', log = console.log,
+  recordingDirectory = process.env.RECORDING_DIRECTORY || '/tmp/onvif-recordings' }) {
   if (isIP(hostname) !== 4 || hostname === '0.0.0.0'
     || !['0.0.0.0', '127.0.0.1'].includes(listen) || !['0.0.0.0', '127.0.0.1'].includes(webListen)
     || (listen === '127.0.0.1' && hostname !== '127.0.0.1')
@@ -65,6 +68,8 @@ export async function startFleet({ config, inventory, cameraCredentials, credent
     throw new Error('Invalid bind address, advertised IPv4 or web port.');
   }
   const store = await settingsStore(settingsFile);
+  // Camera IDs cannot start with "_", so this never collides with per-camera capture folders.
+  const library = await createRecordingLibrary(join(recordingDirectory, '_sessions'));
   const cameras = validateCameraConfig(config, webPort).map((camera) => {
     const getSource = (settings) => cameraSource(inventory, camera, settings, cameraCredentials);
     return { ...camera, initialSettings: store.get(camera.id), getSource,
@@ -95,12 +100,12 @@ export async function startFleet({ config, inventory, cameraCredentials, credent
   };
   try {
     for (const camera of cameras) {
-      const proxy = await startProxy({ ...camera, credentials, hostname, listen,
+      const proxy = await startProxy({ ...camera, credentials, hostname, listen, recordingDirectory,
         enableHls: true, log: (message) => log(`[${camera.id}] ${message}`) });
       running.push({ ...proxy, id: camera.id, hlsPort: camera.hlsPort, credentials });
     }
-    replayController = createReplayController({ cameras: running });
-    web = createWebServer({ hostname, cameras: running, replayController });
+    replayController = createReplayController({ cameras: running, library });
+    web = createWebServer({ hostname, cameras: running, replayController, library });
     await new Promise((resolveListen, reject) => {
       web.once('error', reject);
       web.listen(webPort, webListen, () => { web.removeListener('error', reject); resolveListen(); });

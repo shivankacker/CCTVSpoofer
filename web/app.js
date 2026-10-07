@@ -18,7 +18,8 @@ function renderReplay(state, cameras) {
   element('replay-clock').textContent = `${String(Math.floor(remaining / 60)).padStart(2, '0')}:${String(remaining % 60).padStart(2, '0')}`;
   element('replay-progress').value = state.phase === 'live' ? 0 : 120 - remaining;
   const labels = { live: 'Live', recording: state.remaining ? 'Recording all cameras' : 'Finalizing recordings',
-    preparing: 'Starting replay', replay: 'Looping recorded video', stopping: 'Returning to live' };
+    preparing: 'Starting replay', replay: state.sourceRecording ? 'Looping recorded video | Recording source' : 'Looping recorded video',
+    stopping: 'Returning to live' };
   element('replay-state').textContent = labels[state.phase] || state.phase;
   element('replay-error').textContent = state.error || replayError;
 }
@@ -95,11 +96,14 @@ function player(figure, source, name) {
   let retryTimer;
   let closed = false;
   let active = false;
+  // Safari decodes but does not paint multiple MSE players whose HLS has separate audio; native HLS does.
+  const nativeHls = navigator.vendor === 'Apple Computer, Inc.' && video.canPlayType('application/vnd.apple.mpegurl');
   const connect = () => {
     if (closed || stopped || !active) return;
     clearTimeout(retryTimer);
     hls?.destroy();
-    if (Hls.isSupported()) {
+    hls = null;
+    if (!nativeHls && Hls.isSupported()) {
       hls = new Hls({ lowLatencyMode: true, liveSyncDurationCount: 2, liveMaxLatencyDurationCount: 5,
         maxBufferLength: 6, backBufferLength: 0, maxMaxBufferLength: 12 });
       hls.loadSource(source);
@@ -127,7 +131,7 @@ function player(figure, source, name) {
   video.addEventListener('playing', () => { waiting.hidden = true; status.textContent = figure.dataset.mode === 'replay' ? 'Replay / buffered' : 'Live / buffered'; });
   video.addEventListener('waiting', () => { status.textContent = 'Buffering'; });
   video.addEventListener('pause', () => { status.textContent = 'Paused'; });
-  video.addEventListener('error', () => { if (!Hls.isSupported()) retryTimer = setTimeout(connect, 3000); });
+  video.addEventListener('error', () => { if (!hls) retryTimer = setTimeout(connect, 3000); });
   const suspend = () => {
     active = false;
     clearTimeout(retryTimer);

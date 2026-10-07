@@ -92,3 +92,12 @@ export function recordingArguments({ source, destination, duration = 120 }) {
     '-i', source, '-map', '0:v:0', '-map', '0:a:0?', '-c:v', 'copy', '-c:a', 'copy', '-t', String(duration), '-fs', '134217728',
     '-f', 'matroska', '-y', destination];
 }
+
+export function sourceRecordingArguments({ source, destination }) {
+  // No -nostdin: FFmpeg 7 ignores a single SIGTERM then, so the recorder is stopped with "q" on stdin.
+  // RTP AAC packets carry no keyframe flag; without -copyinkf:a stream copy drops all audio.
+  // Fragmented MP4 stays playable if the recorder is killed before writing its trailer.
+  return ['-hide_banner', '-loglevel', 'error', '-rtsp_transport', 'tcp', '-timeout', '10000000',
+    '-i', source, '-map', '0:v:0', '-map', '0:a:0?', '-c', 'copy', '-copyinkf:a', '-max_interleave_delta', '500000',
+    '-movflags', '+frag_keyframe+empty_moov+default_base_moof', '-f', 'mp4', '-y', destination];
+}

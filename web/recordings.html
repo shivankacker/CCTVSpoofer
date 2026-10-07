@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Recordings / Cameras</title>
+  <style>
+    @font-face {
+      font-family: Plex;
+      src: url('/font.woff2') format('woff2');
+      font-weight: 400;
+      font-display: swap;
+    }
+
+    :root {
+      color-scheme: light;
+      --ink: #192b2a;
+      --muted: #657371;
+      --line: #d6dfdc;
+      --paper: #f3f6f4;
+      --surface: #fff;
+      --hover: #e4eee8;
+      --green: #147b62;
+      --red: #b04440;
+      --amber: #996014;
+      --focus: #428fcb;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        color-scheme: dark;
+        --ink: #e5eeea;
+        --muted: #a6b5ae;
+        --line: #404d46;
+        --paper: #151918;
+        --surface: #202625;
+        --hover: #2f3b35;
+        --green: #6bd4b1;
+        --red: #ff9990;
+        --amber: #eabc72;
+        --focus: #80bfff;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+      letter-spacing: 0;
+    }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--paper);
+      font: 15px/1.5 Plex, 'Avenir Next', sans-serif;
+    }
+
+    button {
+      font: inherit;
+      cursor: pointer;
+    }
+
+    button:disabled {
+      cursor: default;
+      opacity: .5;
+    }
+
+    button:focus-visible,
+    a:focus-visible {
+      outline: 3px solid var(--focus);
+      outline-offset: 4px;
+    }
+
+    main {
+      max-width: 1100px;
+      margin: auto;
+      padding: 30px 40px 45px;
+    }
+
+    .page-header {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 8px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 22px;
+      font-weight: 400;
+    }
+
+    h2 {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 400;
+    }
+
+    .intro,
+    .empty {
+      color: var(--muted);
+      font-size: 13px;
+      margin: 0 0 20px;
+    }
+
+    .nav-link,
+    .text-button {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 36px;
+      padding: 0 12px;
+      border-radius: 4px;
+      border: 1px solid var(--line);
+      background: var(--surface);
+      color: var(--ink);
+      text-decoration: none;
+      font-size: 14px;
+      white-space: nowrap;
+    }
+
+    .nav-link:hover,
+    .text-button:not(:disabled):hover {
+      background: var(--hover);
+    }
+
+    .delete-button {
+      color: var(--red);
+    }
+
+    .nav-link svg,
+    .text-button svg,
+    .icon-button svg {
+      width: 15px;
+      height: 15px;
+      flex-shrink: 0;
+    }
+
+    .icon-button {
+      display: grid;
+      place-items: center;
+      width: 32px;
+      height: 32px;
+      padding: 0;
+      border: 0;
+      border-radius: 4px;
+      background: transparent;
+      color: var(--muted);
+    }
+
+    .icon-button:hover {
+      background: var(--hover);
+      color: var(--ink);
+    }
+
+    .error {
+      color: var(--red);
+      font-size: 13px;
+      margin: 8px 0;
+    }
+
+    .error:empty {
+      display: none;
+    }
+
+    .viewer {
+      margin-bottom: 24px;
+      scroll-margin-top: 16px;
+    }
+
+    .viewer[hidden] {
+      display: none;
+    }
+
+    .viewer-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding-bottom: 8px;
+    }
+
+    .screen {
+      aspect-ratio: 16 / 9;
+      background: #142120;
+    }
+
+    video {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+
+    .sessions,
+    .files {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+
+    .session {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      padding: 16px;
+      margin-bottom: 12px;
+    }
+
+    .session-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .session-title {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .session-meta,
+    .file-size {
+      color: var(--muted);
+      font-size: 12px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .session-status {
+      font-size: 13px;
+      color: var(--amber);
+    }
+
+    .files {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .file {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 0;
+      border-top: 1px solid var(--line);
+    }
+
+    .file-label {
+      flex: 1;
+      min-width: 0;
+      display: grid;
+      overflow-wrap: anywhere;
+    }
+
+    @media (max-width: 740px) {
+      main {
+        padding: 24px 18px;
+      }
+    }
+  </style>
+  <script src="/vendor/lucide.js" defer></script>
+  <script src="/recordings.js" defer></script>
+</head>
+
+<body>
+  <main>
+    <div class="page-header">
+      <a class="nav-link" href="/"><i data-lucide="arrow-left"></i>Live</a>
+      <h1>Recordings</h1>
+      <form action="/logout" method="post" style="margin-left: auto">
+        <button class="icon-button" type="submit" aria-label="Sign out" title="Sign out"><i
+            data-lucide="log-out"></i></button>
+      </form>
+    </div>
+    <p class="intro">Original camera video saved automatically while replay was looping. Recording stops when replay
+      stops.</p>
+    <p id="page-error" class="error" role="status"></p>
+    <section id="viewer" class="viewer" aria-labelledby="viewer-title" hidden>
+      <div class="viewer-header">
+        <h2 id="viewer-title"></h2>
+        <button id="viewer-close" class="icon-button" aria-label="Close player" title="Close player"><i
+            data-lucide="x"></i></button>
+      </div>
+      <div class="screen"><video id="viewer-video" controls playsinline preload="metadata"></video></div>
+    </section>
+    <p id="empty" class="empty" hidden>No recordings yet.</p>
+    <ul id="sessions" class="sessions" aria-label="Recording sessions"></ul>
+  </main>
+  <template id="session-template">
+    <li class="session">
+      <div class="session-header">
+        <div class="session-title">
+          <h2 class="session-time"></h2><span class="session-meta"></span>
+        </div>
+        <span class="session-status" role="status"></span>
+        <button class="text-button delete-button"><i data-lucide="trash"></i>Delete</button>
+      </div>
+      <ul class="files"></ul>
+    </li>
+  </template>
+  <template id="file-template">
+    <li class="file">
+      <span class="file-label"><span class="file-name"></span><span class="file-size"></span></span>
+      <button class="text-button view-button"><i data-lucide="play"></i>View</button>
+    </li>
+  </template>
+</body>
+
+</html>

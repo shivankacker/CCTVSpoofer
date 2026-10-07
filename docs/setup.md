@@ -163,6 +163,10 @@ Native settings default to `stream-settings.local.json`; recordings default to
 `/tmp/onvif-recordings` or `RECORDING_DIRECTORY`. A native Linux install may need
 `OSD_FONT_FILE` pointing to an installed font. Check font availability before use.
 
+For rooted ARM64 Android, see [Native Android Deployment](phone-native.md).
+That procedure uses a Debian chroot without Docker on the phone and does not
+change SSH, networking, or boot settings.
+
 ## Existing Installations
 
 Preserve current environment credentials when upgrading; initialization is only

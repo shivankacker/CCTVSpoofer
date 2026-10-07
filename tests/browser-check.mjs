@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import { chromium } from 'playwright';
 
 const base = process.env.PROXY_WEB_URL || 'http://127.0.0.1:3000';
+const metricsScope = process.env.PROXY_METRICS_SCOPE || 'container';
+assert.ok(['container', 'host', 'unavailable'].includes(metricsScope), 'Invalid PROXY_METRICS_SCOPE.');
 const output = await mkdtemp(join(tmpdir(), 'camera-browser-check-'));
 const browser = await chromium.launch();
 let sessionCookie = '';
@@ -44,14 +46,25 @@ try {
   const originalBefore = await qualityRow.locator('[data-feed="original"] video').evaluate((video) => ({
     width: video.videoWidth, height: video.videoHeight, time: video.currentTime,
   }));
-  await page.waitForFunction(() => /^\d/.test(document.getElementById('cpu-value').textContent), null, { timeout: 15000 });
-  const resourceTimestamp = await page.locator('#resource-scope').getAttribute('title');
-  await page.waitForFunction((before) => document.getElementById('resource-scope').title !== before, resourceTimestamp);
+  if (metricsScope === 'unavailable') {
+    await page.waitForFunction(() => document.getElementById('resource-scope').textContent === 'Unavailable', null, { timeout: 15000 });
+  } else {
+    await page.waitForFunction(() => /^\d/.test(document.getElementById('cpu-value').textContent), null, { timeout: 15000 });
+    const resourceTimestamp = await page.locator('#resource-scope').getAttribute('title');
+    await page.waitForFunction((before) => document.getElementById('resource-scope').title !== before, resourceTimestamp);
+  }
   const metrics = await (await fetch(`${base}/api/metrics`)).json();
-  assert.equal(metrics.available, true);
-  assert.equal(metrics.scope, 'container');
-  assert.ok(metrics.cpu.capacity > 0 && metrics.cpu.percent >= 0);
-  assert.ok(metrics.memory.used > 0 && metrics.memory.capacity > 0);
+  assert.equal(metrics.scope, metricsScope);
+  if (metricsScope === 'unavailable') {
+    assert.equal(metrics.available, false);
+    assert.ok(typeof metrics.reason === 'string' && metrics.reason.length > 0);
+    assert.equal(await page.locator('#cpu-value').textContent(), '--');
+    assert.equal(await page.locator('#memory-value').textContent(), '--');
+  } else {
+    assert.equal(metrics.available, true);
+    assert.ok(metrics.cpu.capacity > 0 && metrics.cpu.percent >= 0);
+    assert.ok(metrics.memory.used > 0 && metrics.memory.capacity > 0);
+  }
   await qualityRow.locator('.quality').selectOption(requested.quality);
   await qualityRow.locator('.fps').selectOption(String(requested.fps));
   await qualityRow.locator('.apply-quality').click();

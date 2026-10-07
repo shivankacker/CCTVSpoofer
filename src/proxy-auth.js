@@ -57,7 +57,7 @@ export function createDashboardAuth(password) {
     }
     if (url.pathname === '/font.woff2' && request.method === 'GET') return false;
     if (loggedIn) return false;
-    if (url.pathname === '/' && request.method === 'GET') redirect('/login');
+    if (['/', '/recordings'].includes(url.pathname) && request.method === 'GET') redirect('/login');
     else {
       response.writeHead(401, { 'Content-Type': 'application/json' });
       response.end(JSON.stringify({ error: 'Sign in required.' }));

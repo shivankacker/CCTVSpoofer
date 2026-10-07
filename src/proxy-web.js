@@ -1,5 +1,6 @@
 import { createServer } from 'node:http';
-import { readFile } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
+import { readFile, stat } from 'node:fs/promises';
 import { Readable } from 'node:stream';
 import { CookieJar } from 'tough-cookie';
 import { videoSettings } from './proxy-media.js';
@@ -9,14 +10,18 @@ import { createDashboardAuth } from './proxy-auth.js';
 const assets = new Map([
   ['/', ['web/index.html', 'text/html; charset=utf-8']],
   ['/app.js', ['web/app.js', 'text/javascript; charset=utf-8']],
+  ['/recordings', ['web/recordings.html', 'text/html; charset=utf-8']],
+  ['/recordings.js', ['web/recordings.js', 'text/javascript; charset=utf-8']],
   ['/vendor/hls.js', ['node_modules/hls.js/dist/hls.min.js', 'text/javascript; charset=utf-8']],
   ['/vendor/lucide.js', ['node_modules/lucide/dist/umd/lucide.js', 'text/javascript; charset=utf-8']],
   ['/font.woff2', ['node_modules/@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin-400-normal.woff2', 'font/woff2']],
 ]);
 
-export function createWebServer({ hostname, hlsPort, credentials, getStatus, setQuality, cameras,
-  monitor = createResourceMonitor(), replayController, dashboardPassword = process.env.DASHBOARD_PASSWORD }) {
+export function createWebServer({ hostname, webHosts = process.env.WEB_HOSTS?.split(',').map(value => value.trim()).filter(Boolean) || [hostname],
+  hlsPort, credentials, getStatus, setQuality, cameras,
+  monitor = createResourceMonitor(), replayController, library, dashboardPassword = process.env.DASHBOARD_PASSWORD }) {
   const authenticate = createDashboardAuth(dashboardPassword);
+  const allowedHosts = new Set(['localhost', '127.0.0.1', ...webHosts]);
   const entries = cameras || [{ id: 'camera-1', hlsPort, credentials, getStatus, setQuality }];
   const routes = new Map(entries.map((entry) => [entry.id, { ...entry, cookies: new CookieJar() }]));
   const changing = new Set();
@@ -34,7 +39,7 @@ export function createWebServer({ hostname, hlsPort, credentials, getStatus, set
     try {
       const origin = `${request.socket.encrypted ? 'https' : 'http'}://${request.headers.host}`;
       const url = new URL(request.url, origin);
-      if (!['localhost', '127.0.0.1', hostname].includes(new URL(origin).hostname)) {
+      if (!allowedHosts.has(new URL(origin).hostname)) {
         json(403, { error: 'Host not allowed.' });
         return;
       }
@@ -56,6 +61,46 @@ export function createWebServer({ hostname, hlsPort, credentials, getStatus, set
       }
       if (request.method === 'GET' && url.pathname === '/api/metrics') {
         json(200, await monitor.sample());
+        return;
+      }
+      if (library && request.method === 'GET' && url.pathname === '/api/recordings') {
+        json(200, { recordings: await library.list() });
+        return;
+      }
+      const deleteMatch = /^\/api\/recordings\/([0-9a-f-]+)$/.exec(url.pathname);
+      if (library && request.method === 'DELETE' && deleteMatch) {
+        if (request.headers.origin !== origin || request.headers['sec-fetch-site'] === 'cross-site') {
+          json(403, { error: 'Same-origin requests are required.' }); return;
+        }
+        const result = await library.remove(deleteMatch[1]);
+        if (result === 'active') json(409, { error: 'This recording is still in progress. Stop the replay first.' });
+        else if (result === 'missing') json(404, { error: 'Recording not found.' });
+        else json(200, { deleted: deleteMatch[1] });
+        return;
+      }
+      const fileMatch = /^\/recordings\/([^/]+)\/([^/]+)$/.exec(url.pathname);
+      if (library && request.method === 'GET' && fileMatch) {
+        const path = library.file(fileMatch[1], fileMatch[2]);
+        const info = path && await stat(path).catch(() => null);
+        if (!info?.isFile() || !info.size) { json(404, { error: 'Recording not found.' }); return; }
+        const { size } = info;
+        let start = 0;
+        let end = size - 1;
+        if (request.headers.range) {
+          const range = /^bytes=(\d*)-(\d*)$/.exec(request.headers.range);
+          if (range?.[1]) {
+            start = Number(range[1]);
+            if (range[2]) end = Math.min(Number(range[2]), size - 1);
+          } else if (range?.[2]) start = Math.max(0, size - Number(range[2]));
+          if (!range || (!range[1] && !range[2]) || start > end) {
+            response.writeHead(416, { 'Content-Range': `bytes */${size}` }); response.end(); return;
+          }
+        }
+        response.writeHead(request.headers.range ? 206 : 200, { 'Content-Type': 'video/mp4', 'Accept-Ranges': 'bytes',
+          'Content-Length': end - start + 1, ...(request.headers.range ? { 'Content-Range': `bytes ${start}-${end}/${size}` } : {}) });
+        const stream = createReadStream(path, { start, end });
+        stream.on('error', () => response.destroy());
+        stream.pipe(response);
         return;
       }
       const controlMatch = /^\/api\/cameras\/([a-z0-9-]+)\/quality$/.exec(url.pathname);

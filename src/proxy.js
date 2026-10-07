@@ -10,6 +10,7 @@ import { pathToFileURL } from 'node:url';
 import { environmentCredentials } from './cameras.js';
 import { authenticatedUri, processedArguments, recordingArguments, previewArguments, originalVideo, selectStream, video, videoSettings } from './proxy-media.js';
 import { createReplayController } from './proxy-replay.js';
+import { recordSource } from './proxy-recordings.js';
 import { createOnvifServer } from './proxy-onvif.js';
 import { createWebServer } from './proxy-web.js';
 
@@ -322,7 +323,10 @@ export async function startProxy(options) {
     log(`ONVIF: http://${hostname}:${onvifPort}/onvif/device_service`);
     log(`RTSP: rtsp://${hostname}:${rtspPort}/processed`);
     if (webPort) log(`Web: http://localhost:${webPort} (keep this control port restricted to localhost).`);
-    return { stop, done, getStatus, setQuality, ...replayCamera };
+    return { stop, done, getStatus, setQuality, ...replayCamera,
+      // Reads the proxy's own original relay, so no extra camera RTSP session or encoder is needed.
+      recordSource: (recordingDirectory) => recordSource({ directory: recordingDirectory, name: id,
+        source: authenticatedUri(`rtsp://127.0.0.1:${rtspPort}/original`, credentials) }) };
   } catch (error) {
     await stop();
     throw error;

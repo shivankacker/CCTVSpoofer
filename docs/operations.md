@@ -22,6 +22,19 @@ camera overlay changes must be deliberate, because direct NVR recordings would
 also be affected. NVRs that still connect directly to cameras are unaffected by
 proxy replay; an NVR connected to the processed proxy would record replay.
 
+## Source Recordings
+
+While replay loops, every camera's live `/original` stream (854x480, 10 fps,
+H.264/AAC) is also saved, starting just before the loop and ending at **Stop**.
+Recording copies the proxy's existing preview, so it opens no extra camera RTSP
+sessions and adds no encoding. It is not the native main-stream resolution.
+If a preview reconnects, recording resumes and the pieces are joined on Stop.
+
+The **Recordings** page lists each replay session with one MP4 per camera.
+Recordings can be viewed in the browser or deleted; a session can only be
+deleted after it has finished saving. There is no automatic retention or disk
+limit, so delete old sessions to free space.
+
 ## Streams and Quality
 
 | Path | Output |
@@ -53,8 +66,8 @@ requires separate testing even though RTSP may carry audio.
 
 ## Security and Password Rotation
 
-`DASHBOARD_PASSWORD` protects dashboard assets, state/metrics/control APIs, and
-proxied HLS. Only login, its font, and minimal `/healthz` status are public.
+`DASHBOARD_PASSWORD` protects dashboard assets, state/metrics/control APIs,
+source recordings, and proxied HLS. Only login, its font, and minimal `/healthz` status are public.
 Sessions use HttpOnly, SameSite=Strict cookies, expire after 12 hours, and are
 invalidated on restart. Sign-out revokes the current session. There is one shared
 password, not individual users; login attempts are globally limited to 10/minute.
@@ -97,7 +110,12 @@ Stop, cancellation, failure, and orderly shutdown delete temporary clips. Startu
 discards old clips for configured cameras and begins live; this is not archival
 storage or automatic replay recovery.
 
-`docker compose down` preserves volumes. Adding `-v` destroys settings and clips.
+Source recordings are kept in the same volume under `/recordings/_sessions/` and
+survive restarts until deleted from the Recordings page. Native installs use
+`RECORDING_DIRECTORY` (default `/tmp/onvif-recordings`, which the OS may clear).
+
+`docker compose down` preserves volumes. Adding `-v` destroys settings, clips and
+source recordings.
 Stop capture/replay before restarting or rebuilding.
 The generated `.env` remains a private plaintext secret requiring secure backup.
 

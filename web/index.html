@@ -186,6 +186,31 @@
       font-size: inherit;
     }
 
+    .nav-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 32px;
+      padding: 0 8px;
+      border-radius: 4px;
+      color: var(--ink);
+      text-decoration: none;
+    }
+
+    .nav-link:hover {
+      background: var(--hover);
+    }
+
+    .nav-link:focus-visible {
+      outline: 3px solid var(--focus);
+      outline-offset: 4px;
+    }
+
+    .nav-link svg {
+      width: 15px;
+      height: 15px;
+    }
+
     #replay-progress {
       appearance: none;
       position: absolute;
@@ -614,7 +639,8 @@
       <div class="replay-summary">
         <span id="replay-state" role="status">Live</span>
         <div class="signal" id="signal"><span class="dot"></span><span id="connection">Connecting</span></div>
-        <form action="/logout" method="post" style="margin-left: auto">
+        <a class="nav-link" href="/recordings" style="margin-left: auto"><i data-lucide="film"></i>Recordings</a>
+        <form action="/logout" method="post">
           <button class="icon-button" type="submit" aria-label="Sign out" title="Sign out"><i
               data-lucide="log-out"></i></button>
         </form>

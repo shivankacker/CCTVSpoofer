@@ -8,18 +8,19 @@ import { createHash, randomBytes } from 'node:crypto';
 import { relayConfig, main, startProxy, settingsStore } from '../src/proxy.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createWebServer as authenticatedWebServer } from '../src/proxy-web.js';
 import { createResourceMonitor } from '../src/proxy-monitor.js';
-import { get as httpGet } from 'node:http';
+import { get as httpGet, request as httpRequest } from 'node:http';
 import { validateCameraConfig, configureCameraEnvironment, cameraSource } from '../src/proxy-fleet.js';
 import { bridgeArguments, renderEnvironment } from '../scripts/bridge.mjs';
 import { parseEnv } from 'node:util';
-import { processedArguments, recordingArguments } from '../src/proxy-media.js';
+import { processedArguments, recordingArguments, sourceRecordingArguments } from '../src/proxy-media.js';
 import { createReplayController } from '../src/proxy-replay.js';
+import { createRecordingLibrary, finalizeRecording } from '../src/proxy-recordings.js';
 
 const execute = promisify(execFile);
 const createWebServer = (options) => authenticatedWebServer({ dashboardPassword: null, ...options });
@@ -33,9 +34,10 @@ test('dashboard password protects assets, APIs and media; sessions expire on log
   assert.equal((await fetch(origin + '/login')).headers.get('referrer-policy'), 'same-origin');
   assert.equal((await fetch(origin + '/healthz')).status, 200);
   assert.equal((await fetch(origin, { redirect: 'manual' })).headers.get('location'), '/login');
-  for (const path of ['/api/state', '/api/metrics', '/app.js', '/live/camera-1/original/index.m3u8']) {
+  for (const path of ['/api/state', '/api/metrics', '/api/recordings', '/app.js', '/recordings.js', '/live/camera-1/original/index.m3u8']) {
     assert.equal((await fetch(origin + path)).status, 401);
   }
+  assert.equal((await fetch(origin + '/recordings', { redirect: 'manual' })).headers.get('location'), '/login');
   assert.equal((await fetch(origin + '/api/replay/start', { method: 'POST' })).status, 401);
   const login = (password, extra = {}) => fetch(origin + '/login', { method: 'POST', redirect: 'manual',
     headers: { Origin: origin, 'Content-Type': 'application/x-www-form-urlencoded', ...extra }, body: new URLSearchParams({ password }) });
@@ -54,6 +56,40 @@ test('dashboard password protects assets, APIs and media; sessions expire on log
   assert.equal((await fetch(origin + '/api/state', { headers })).status, 401);
   for (let attempt = 0; attempt < 8; attempt++) await login('wrong');
   assert.equal((await login('test-password-1234')).status, 429);
+});
+
+test('separate web hosts permit LAN and Tailscale login without allowing arbitrary hosts or cross-origin requests', async (context) => {
+  const server = createWebServer({ hostname: '127.0.0.1', webHosts: ['192.168.1.7', '100.64.0.10'],
+    dashboardPassword: 'test-password-1234', getStatus: () => ({ streaming: true }) });
+  await new Promise((resolveListen) => server.listen(0, '127.0.0.1', resolveListen));
+  context.after(() => new Promise((resolveClose) => { server.close(resolveClose); server.closeAllConnections(); }));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const host = `100.64.0.10:${server.address().port}`;
+  const send = (path, options = {}) => new Promise((resolveResponse, reject) => {
+    const request = httpRequest(base + path, { method: options.method, headers: options.headers }, (response) => {
+      response.resume();
+      response.once('end', () => resolveResponse(response));
+      response.once('error', reject);
+    });
+    request.once('error', reject);
+    request.end(options.body);
+  });
+  assert.equal((await send('/healthz', { headers: { Host: host } })).statusCode, 200);
+  assert.equal((await send('/healthz', { headers: { Host: '192.168.1.7' } })).statusCode, 200);
+  assert.equal((await send('/healthz', { headers: { Host: 'evil.example' } })).statusCode, 403);
+  assert.equal((await send('/api/state', { headers: { Host: host } })).statusCode, 401);
+  const login = (origin) => send('/login', { method: 'POST',
+    headers: { Host: host, Origin: origin, 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ password: 'test-password-1234' }).toString() });
+  assert.equal((await login('http://evil.example')).statusCode, 403);
+  const response = await login(`http://${host}`);
+  assert.equal(response.statusCode, 303);
+  const cookie = response.headers['set-cookie'][0].split(';')[0];
+  assert.equal((await send('/api/state', { headers: { Host: host, Cookie: cookie } })).statusCode, 200);
+  const lanHost = `192.168.1.7:${server.address().port}`;
+  assert.equal((await send('/login', { method: 'POST',
+    headers: { Host: lanHost, Origin: `http://${lanHost}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ password: 'test-password-1234' }).toString() })).statusCode, 303);
 });
 
 test('replay API requires same-origin empty JSON and locks quality while a recording session is active', async (context) => {
@@ -118,6 +154,143 @@ test('stop cancels pending recordings without entering replay and failed recordi
   assert.equal(controller.getStatus().phase, 'live');
   assert.match(controller.getStatus().error, /failed/);
   assert.equal(played, false);
+});
+
+const settle = async (check) => { for (let turn = 0; turn < 100 && !check(); turn++) await new Promise(setImmediate); };
+
+test('source recording starts before the loop, stops with replay and is saved even when playback fails', async () => {
+  const events = [];
+  const camera = (id, playRecording = async () => {}) => ({ getStatus: () => ({ id, name: `Camera ${id}`, streaming: true }),
+    record: async () => {}, cancelRecording: async () => {}, deleteRecording: async () => {},
+    resumeLive: async () => { events.push(`live${id}`); },
+    playRecording: async () => { events.push(`play${id}`); await playRecording(); },
+    recordSource: (directory) => { events.push(`source${id}:${directory}`); return { stop: async () => { events.push(`saved${id}`); } }; } });
+  const finished = [];
+  const library = { create: async (cameras) => ({ id: cameras.map((entry) => entry.id).join('+'), directory: '/archive' }),
+    finish: async (id, finalize) => { await finalize(); finished.push(id); } };
+  const controller = createReplayController({ cameras: [camera('a'), camera('b')], library });
+  controller.start();
+  await settle(() => controller.getStatus().phase === 'replay');
+  assert.equal(controller.getStatus().phase, 'replay');
+  assert.equal(controller.getStatus().sourceRecording, 'a+b');
+  assert.ok(events.indexOf('sourcea:/archive') < events.indexOf('playa'));
+  assert.ok(!events.includes('saveda'));
+  await controller.close();
+  assert.equal(controller.getStatus().sourceRecording, null);
+  assert.deepEqual(finished, ['a+b']);
+  assert.ok(events.includes('saveda') && events.includes('savedb') && events.includes('livea'));
+
+  const failing = createReplayController({ cameras: [camera('c', async () => { throw new Error('no replay'); })], library });
+  failing.start();
+  await settle(() => finished.length === 2);
+  await failing.close();
+  assert.deepEqual(finished, ['a+b', 'c']);
+  assert.match(failing.getStatus().error, /failed/);
+
+  const args = sourceRecordingArguments({ source: 'rtsp://proxy/original', destination: '/archive/a.part1.mp4' });
+  assert.equal(args[args.indexOf('-c') + 1], 'copy');
+  assert.ok(args.includes('0:a:0?'));
+  assert.match(args[args.indexOf('-movflags') + 1], /frag_keyframe/);
+  assert.ok(!args.includes('-t') && !args.includes('-vf'));
+  assert.ok(!args.includes('-nostdin'), 'The recorder must accept "q" on stdin for a clean stop');
+});
+
+test('recording library lists sessions, protects active ones, rejects unsafe names and recovers interrupted saves', async (context) => {
+  const root = await mkdtemp(join(tmpdir(), 'recording-library-'));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  let now = 1760000000000;
+  const library = await createRecordingLibrary(root, () => now);
+  const session = await library.create([{ id: 'camera-1', name: 'Lobby' }]);
+  await writeFile(join(session.directory, 'camera-1.part1.mp4'), 'partial');
+  let [listed] = await library.list();
+  assert.equal(listed.status, 'recording');
+  assert.equal(listed.files[0].cameraName, 'Lobby');
+  assert.equal(await library.remove(session.id), 'active');
+  now += 90000;
+  await library.finish(session.id, async () => {
+    assert.equal((await library.list())[0].status, 'saving');
+    await rename(join(session.directory, 'camera-1.part1.mp4'), join(session.directory, 'camera-1.mp4'));
+  });
+  [listed] = await library.list();
+  assert.equal(listed.status, 'complete');
+  assert.equal(Date.parse(listed.endedAt) - Date.parse(listed.startedAt), 90000);
+  assert.deepEqual(listed.files.map((file) => file.url), [`/recordings/${session.id}/camera-1.mp4`]);
+  assert.equal(library.file(session.id, 'session.json'), null);
+  assert.equal(library.file('..', 'camera-1.mp4'), null);
+  assert.equal(library.file(session.id, '../camera-1.mp4'), null);
+  now += 1000;
+  const empty = await library.create([{ id: 'camera-1', name: 'Lobby' }]);
+  await library.finish(empty.id, async () => {});
+  assert.equal((await library.list()).length, 1);
+  for (const name of ['camera-1.part2.mp4', 'camera-1.mp4.tmp', 'camera-1.concat.txt']) await writeFile(join(session.directory, name), 'x');
+  const reopened = await createRecordingLibrary(root);
+  assert.deepEqual((await readdir(session.directory)).sort(), ['camera-1.mp4', 'session.json']);
+  assert.equal(await reopened.remove(session.id), 'deleted');
+  assert.equal(await reopened.remove(session.id), 'missing');
+  assert.deepEqual(await reopened.list(), []);
+});
+
+test('recordings API lists sessions, serves byte ranges and deletes only finished sessions from the same origin', async (context) => {
+  const root = await mkdtemp(join(tmpdir(), 'recording-web-'));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  let now = 1760000000000;
+  const library = await createRecordingLibrary(root, () => now++);
+  const done = await library.create([{ id: 'camera-1', name: 'Lobby' }]);
+  await library.finish(done.id, () => writeFile(join(done.directory, 'camera-1.mp4'), '0123456789'));
+  const active = await library.create([{ id: 'camera-1', name: 'Lobby' }]);
+  const server = createWebServer({ hostname: '127.0.0.1', library, cameras: [{ id: 'camera-1', getStatus: () => ({ streaming: true }) }] });
+  await new Promise((resolveListen) => server.listen(0, '127.0.0.1', resolveListen));
+  context.after(() => new Promise((resolveClose) => { server.close(resolveClose); server.closeAllConnections(); }));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const { recordings } = await (await fetch(origin + '/api/recordings')).json();
+  assert.deepEqual(recordings.map((session) => [session.id, session.status]), [[active.id, 'recording'], [done.id, 'complete']]);
+  assert.equal((await fetch(origin + '/recordings')).headers.get('content-type'), 'text/html; charset=utf-8');
+  const file = `${origin}/recordings/${done.id}/camera-1.mp4`;
+  const full = await fetch(file);
+  assert.equal(full.headers.get('content-type'), 'video/mp4');
+  assert.equal(full.headers.get('accept-ranges'), 'bytes');
+  assert.equal(await full.text(), '0123456789');
+  const partial = await fetch(file, { headers: { Range: 'bytes=2-5' } });
+  assert.equal(partial.status, 206);
+  assert.equal(partial.headers.get('content-range'), 'bytes 2-5/10');
+  assert.equal(await partial.text(), '2345');
+  assert.equal(await (await fetch(file, { headers: { Range: 'bytes=-3' } })).text(), '789');
+  assert.equal((await fetch(file, { headers: { Range: 'bytes=20-' } })).status, 416);
+  for (const path of [`/recordings/${done.id}/session.json`, '/recordings/..%2F/camera-1.mp4', `/recordings/${done.id}/..%2Fsession.json`]) {
+    assert.equal((await fetch(origin + path)).status, 404);
+  }
+  const remove = (id, requestOrigin = origin) => fetch(`${origin}/api/recordings/${id}`, { method: 'DELETE', headers: { Origin: requestOrigin } });
+  assert.equal((await remove(done.id, 'http://evil.example')).status, 403);
+  assert.equal((await remove(active.id)).status, 409);
+  assert.equal((await remove(done.id)).status, 200);
+  assert.equal((await remove(done.id)).status, 404);
+  assert.equal((await fetch(file)).status, 404);
+});
+
+test('source recording parts are joined into one seekable MP4 and unreadable parts are discarded', {
+  skip: !process.env.PROXY_MEDIA_TEST, timeout: 30000,
+}, async (context) => {
+  const directory = await mkdtemp(join(tmpdir(), 'source-recording-'));
+  context.after(() => rm(directory, { recursive: true, force: true }));
+  const source = join(directory, 'source.mkv');
+  await execute('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=s=640x360:r=10',
+    '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000', '-t', '2', '-c:v', 'libx264', '-threads', '2',
+    '-preset', 'ultrafast', '-g', '10', '-c:a', 'aac', source]);
+  const args = sourceRecordingArguments({ source, destination: 'unused' });
+  const parts = ['camera-1.part1.mp4', 'camera-1.part2.mp4', 'camera-1.part3.mp4'];
+  for (const part of parts.slice(0, 2)) {
+    await execute('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-nostdin', ...args.slice(args.indexOf('-i'), -1), join(directory, part)]);
+  }
+  await writeFile(join(directory, parts[2]), '');
+  await finalizeRecording(directory, 'camera-1', parts);
+  assert.deepEqual((await readdir(directory)).sort(), ['camera-1.mp4', 'source.mkv']);
+  const output = join(directory, 'camera-1.mp4');
+  const info = JSON.parse((await execute('ffprobe', ['-v', 'error', '-show_entries', 'stream=codec_name:format=duration',
+    '-of', 'json', output])).stdout);
+  assert.deepEqual(info.streams.map((stream) => stream.codec_name), ['h264', 'aac']);
+  assert.ok(Math.abs(Number(info.format.duration) - 4) < 0.3);
+  const bytes = await readFile(output);
+  assert.ok(bytes.indexOf('moov') < bytes.indexOf('mdat'), 'Index must precede media so browsers can seek immediately');
 });
 
 test('recording copies clean camera video and replay applies fresh OSD after a paced looping input', () => {
