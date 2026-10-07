@@ -5,6 +5,8 @@ const profiles = {
   '480p': { width: 854, height: 480, bitrate: 1000 },
   '1080p': { width: 1920, height: 1080, fps: 15, bitrate: 4000 },
   '720p': { width: 1280, height: 720, fps: 15, bitrate: 2500 },
+  // CP Plus NVR web view only plays H.264 natively above 1280x720 pixels; read the cheap 720p camera sub stream.
+  '736p': { width: 1312, height: 736, bitrate: 2500, sourceWidth: 1280, sourceHeight: 720 },
 };
 const profile = process.env.VIDEO_PROFILE || '1080p';
 export const frameRates = Object.freeze([5, 10, 15, 20, 25, 30]);
@@ -47,24 +49,34 @@ export function authenticatedUri(uri, credentials) {
 }
 
 export function selectStream(inventory, hostname, settings = video) {
+  const width = settings.sourceWidth ?? settings.width;
+  const height = settings.sourceHeight ?? settings.height;
   const camera = inventory.cameras?.find((entry) => entry.hostname === hostname);
   const streams = camera?.streams?.filter((entry) => entry.resolution?.width > 0 && entry.resolution?.height > 0) || [];
   const ordered = streams.sort((left, right) => left.resolution.width * left.resolution.height - right.resolution.width * right.resolution.height);
   const matchingAspect = ordered.filter((entry) =>
-    Math.abs(entry.resolution.width / entry.resolution.height - settings.width / settings.height) < 0.02);
+    Math.abs(entry.resolution.width / entry.resolution.height - width / height) < 0.02);
   const candidates = matchingAspect.length ? matchingAspect : ordered;
-  const stream = candidates.find((entry) => entry.resolution.width >= settings.width && entry.resolution.height >= settings.height)
+  const stream = candidates.find((entry) => entry.resolution.width >= width && entry.resolution.height >= height)
     || candidates.at(-1)
     || ordered.at(-1);
   if (!stream) throw new Error(`No discovered video stream for ${hostname}; run inspect first.`);
   return cleanStreamUri(stream.uri, hostname);
 }
 
-function encodeArguments(label, uri, video) {
+// NVRs relay camera-style G.711 cleanly but corrupt AAC; browsers' HLS needs AAC.
+const audioCodecs = {
+  aac: ['-c:a', 'aac', '-b:a', '64k', '-ar', '48000', '-ac', '1'],
+  g711: ['-c:a', 'pcm_alaw', '-ar', '8000', '-ac', '1'],
+};
+
+function encodeArguments(label, uri, video, audio = 'aac') {
   return [
-    '-map', label, '-map', '0:a:0?', '-c:a', 'aac', '-b:a', '64k', '-ar', '48000', '-ac', '1',
+    '-map', label, '-map', '0:a:0?', ...audioCodecs[audio],
     '-af', 'asetpts=PTS-STARTPTS,aresample=async=1000:first_pts=0',
     '-c:v', 'libx264', '-threads', '2', '-preset', 'ultrafast', '-coder', '1', '-tune', 'zerolatency',
+    // zerolatency defaults to one slice per thread; NVR web players render multi-slice frames black.
+    '-x264-params', 'sliced-threads=0',
     '-profile:v', 'main', '-pix_fmt', 'yuv420p',
     '-b:v', `${video.bitrate}k`, '-maxrate', `${video.bitrate}k`, '-bufsize', '2000k',
     '-g', String(video.fps), '-keyint_min', String(video.fps), '-sc_threshold', '0',
@@ -83,7 +95,7 @@ export function processedArguments({ source, destination, recording = false, set
   return ['-hide_banner', '-loglevel', 'error', '-nostdin', '-threads', '2',
     ...(recording ? ['-stream_loop', '-1', '-re'] : ['-rtsp_transport', 'tcp', '-timeout', '10000000']),
     '-i', source, '-filter_threads', '2', '-vf', `${fitFilter(settings)}${osdFilter(osd, settings)},format=yuv420p`,
-    ...encodeArguments('0:v:0', destination, settings)];
+    ...encodeArguments('0:v:0', destination, settings, 'g711')];
 }
 
 export function recordingArguments({ source, destination, duration = 120 }) {

@@ -115,11 +115,14 @@ npm run phone:web-access
 
 This runs the launcher's root `web-access` action over SSH. It checks
 authenticated replay state, backs up the environment to
-`rootfs/app/.env.before-web-access`, sets `WEB_LISTEN_ADDRESS=0.0.0.0` and
-`WEB_HOSTS=LAN_IP,TAILSCALE_IP`, and restarts only the fleet through its existing
-supervisor. Credentials, recordings, saved quality, and RTSP/ONVIF loopback
-listeners are preserved. Do not rerun `install`. If either address changes, edit
-`.env` and run the command again.
+`rootfs/app/.env.before-web-access`, sets `WEB_LISTEN_ADDRESS=0.0.0.0`,
+`WEB_HOSTS=LAN_IP,TAILSCALE_IP`, `LISTEN_ADDRESS=0.0.0.0` and
+`ADVERTISE_HOST=LAN_IP`, and restarts only the fleet through its existing
+supervisor. RTSP (8554-8557) and ONVIF (8080-8083) then accept LAN clients such
+as an NVR, protected by the proxy credentials; ONVIF returns RTSP URLs on the LAN
+address. Credentials, recordings and saved quality are preserved. Do not rerun
+`install`. If either address changes, edit `.env`, run the command again, and
+update the NVR channels.
 
 The dashboard then uses `http://LAN_IP:3000` on the office LAN and
 `http://TAILSCALE_IP:3000` from tailnet devices permitted by the existing Tailscale

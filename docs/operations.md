@@ -48,12 +48,21 @@ Camera 1 normally exposes `rtsp://127.0.0.1:8554/processed` and
 additional cameras. Supply proxy credentials in the player's credential dialog,
 not in shared URLs. Internal HLS ports 8888-8891 are not publicly published.
 
-Processed resolutions are 640x360, 854x480, 1280x720, and 1920x1080; FPS options
+Processed resolutions are 640x360, 854x480, 1280x720, 1312x736 (736p), and 1920x1080; FPS options
 are 5, 10, 15, 20, 25, and 30. Changes affect the processed transcoder only, not
 camera encoder settings, original previews, or passthrough. Saved settings take
 precedence over environment defaults. Higher output FPS cannot create camera detail.
 
-Original and processed previews carry optional AAC audio at 48 kHz, mono, 64 kbps.
+Original previews carry optional AAC audio at 48 kHz, mono, 64 kbps. The processed
+RTSP/ONVIF stream carries camera-style G.711 A-law at 8 kHz, because NVRs relay it
+natively but corrupt AAC; browsers cannot play G.711 over HLS, so the dashboard's
+processed preview is silent. Processed H.264 uses one slice per frame and ONVIF
+advertises main and sub profiles (both the processed stream) for NVR live view.
+CP Plus NVR web live view only uses the browser's native decoder above 1280x720;
+at 720p and below its built-in software decoder showed black frames. Use 736p for
+NVR channels: it just exceeds that threshold while reading the camera's 720p sub
+stream, so it costs about the same as 720p (1080p on all four cameras overloaded
+the phone).
 Capture copies the selected source video and first audio track into Matroska.
 Replay loops captured audio with captured video, not the live microphone.
 Cameras without audio remain video-only. Passthrough preserves native codecs.

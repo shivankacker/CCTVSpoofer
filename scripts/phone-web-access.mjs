@@ -17,7 +17,7 @@ export function phoneWebAccessArguments(environment) {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
     const args = phoneWebAccessArguments(process.env);
-    console.log(`Allowing http://${process.env.PHONE_LAN_IP}:3000 and http://${process.env.PHONE_TAILSCALE_IP}:3000 on the phone; this restarts the phone server.`);
+    console.log(`Allowing http://${process.env.PHONE_LAN_IP}:3000 and http://${process.env.PHONE_TAILSCALE_IP}:3000, RTSP/ONVIF on ${process.env.PHONE_LAN_IP}; this restarts the phone server.`);
     const child = spawn('ssh', args, { stdio: 'inherit' });
     child.once('error', () => { console.error('Could not start SSH.'); process.exitCode = 1; });
     child.once('exit', (code) => { process.exitCode = code ?? 1; });

@@ -63,6 +63,9 @@ assert.equal(response.status, 200, 'Could not check replay state; no configurati
 assert.equal((await response.json()).replay.phase, 'live', 'Stop recording/replay before changing web access.');
 settings.WEB_HOSTS = `${lanAddress},${address}`;
 settings.WEB_LISTEN_ADDRESS = '0.0.0.0';
+// ONVIF hands NVRs RTSP URLs built from ADVERTISE_HOST, so it must be the LAN address.
+settings.LISTEN_ADDRESS = '0.0.0.0';
+settings.ADVERTISE_HOST = lanAddress;
 const updated = Object.entries(settings).map(([key, value]) => `${key}=${JSON.stringify(value)}`).join('\n') + '\n';
 assert.deepEqual(parseEnv(updated), settings);
 await copyFile(filename, '/app/.env.before-web-access', constants.COPYFILE_EXCL).catch(error => {
@@ -77,7 +80,7 @@ try {
 } finally {
   await rm(directory, { recursive: true, force: true });
 }
-console.log(`Dashboard configured for http://${lanAddress}:3000 and http://${address}:3000; credentials and stream settings preserved.`);
+console.log(`Dashboard configured for http://${lanAddress}:3000 and http://${address}:3000; RTSP/ONVIF advertised on ${lanAddress}; credentials and stream settings preserved.`);
 CONFIG
     sv -w 30 restart "$service"
     ;;

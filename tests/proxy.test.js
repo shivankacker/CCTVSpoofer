@@ -309,12 +309,14 @@ test('recording copies clean camera video and replay applies fresh OSD after a p
   assert.equal(args[args.indexOf('-stream_loop') + 1], '-1');
   assert.match(args[args.indexOf('-vf') + 1], /localtime/);
   assert.ok(!args.includes('-filter_complex'));
-  for (const output of [args, previewArguments({ source: 'rtsp://camera/live', destination: 'rtsp://proxy/original' })]) {
+  for (const [output, codec] of [[args, 'pcm_alaw'], [previewArguments({ source: 'rtsp://camera/live', destination: 'rtsp://proxy/original' }), 'aac']]) {
     assert.ok(output.includes('0:a:0?'));
     assert.ok(!output.includes('-an'));
-    assert.equal(output[output.indexOf('-c:a') + 1], 'aac');
+    assert.equal(output[output.indexOf('-c:a') + 1], codec);
     assert.match(output[output.indexOf('-af') + 1], /asetpts=PTS-STARTPTS,aresample/);
   }
+  assert.equal(args[args.indexOf('-ar') + 1], '8000', 'NVRs expect camera-style 8 kHz G.711 on the processed stream');
+  assert.equal(args[args.indexOf('-x264-params') + 1], 'sliced-threads=0', 'NVR web players need one slice per frame');
   assert.ok(!processedArguments({ source: 'rtsp://camera/live', destination: 'rtsp://proxy/out' }).includes('-re'));
 });
 
@@ -338,7 +340,7 @@ test('audio survives capture and stays aligned across replay loops; silent camer
   const args = processedArguments({ source: clip, destination: 'unused', recording: true, settings: videoSettings('360p', 10) });
   await execute('ffmpeg', [...args.slice(0, args.lastIndexOf('-f')), '-t', '6', '-f', 'matroska', replay], { timeout: 15000 });
   const info = await inspect(replay);
-  assert.deepEqual(info.streams.map((stream) => stream.codec_name), ['h264', 'aac']);
+  assert.deepEqual(info.streams.map((stream) => stream.codec_name), ['h264', 'pcm_alaw']);
   const timelines = info.streams.map((stream, index) => info.packets.filter((packet) => packet.stream_index === index).map((packet) => Number(packet.pts_time)));
   for (const timeline of timelines) {
     assert.ok(timeline.at(-1) > 5.8);
@@ -663,19 +665,21 @@ function soap(action, credentials, created = new Date().toISOString()) {
     </wsse:UsernameToken></wsse:Security></s:Header><s:Body><tds:${action}/></s:Body></s:Envelope>`;
 }
 
-test('existing ONVIF client discovers only the proxy profile and credential-free proxy URI', async (context) => {
+test('existing ONVIF client discovers main and sub proxy profiles, both serving only the processed stream', async (context) => {
   const { port, credentials } = await serve(context);
   const camera = await new Promise((resolve, reject) => {
     const client = new onvif.Cam({ hostname: '127.0.0.1', port, ...credentials, timeout: 3000 },
       (error) => error ? reject(error) : resolve(client));
   });
   const profiles = await call(camera, 'getProfiles');
-  assert.equal(profiles.length, 1);
-  assert.equal(profiles[0].$.token, 'processed');
-  assert.equal(profiles[0].videoEncoderConfiguration.encoding, 'H264');
+  assert.deepEqual(profiles.map((profile) => profile.$.token), ['processed', 'processed-sub']);
+  assert.deepEqual(profiles.map((profile) => profile.videoEncoderConfiguration.$.token), ['encoder', 'encoder-sub']);
+  for (const profile of profiles) assert.equal(profile.videoEncoderConfiguration.encoding, 'H264');
   assert.equal(camera.videoSources.length, 1);
-  const stream = await call(camera, 'getStreamUri', { protocol: 'RTSP', stream: 'RTP-Unicast', profileToken: 'processed' });
-  assert.equal(stream.uri, 'rtsp://127.0.0.1:8554/processed');
+  for (const profileToken of ['processed', 'processed-sub']) {
+    const stream = await call(camera, 'getStreamUri', { protocol: 'RTSP', stream: 'RTP-Unicast', profileToken });
+    assert.equal(stream.uri, 'rtsp://127.0.0.1:8554/processed');
+  }
   await assert.rejects(call(camera, 'getStreamUri', { protocol: 'RTSP', stream: 'RTP-Unicast', profileToken: 'original' }));
 });
 
@@ -713,6 +717,10 @@ test('360p keeps the widescreen camera profile instead of selecting the narrower
     { uri: 'rtsp://192.168.1.12/main', resolution: { width: 1920, height: 1080 } },
   ] }] };
   assert.equal(selectStream(inventory, '192.168.1.12', videoSettings('360p', 5)), 'rtsp://192.168.1.12/sub');
+  assert.equal(selectStream(inventory, '192.168.1.12', videoSettings('736p', 10)), 'rtsp://192.168.1.12/sub');
+  const nvr = videoSettings('736p', 10);
+  assert.ok(nvr.width * nvr.height > 921600 && nvr.width % 16 === 0 && nvr.height % 16 === 0,
+    'NVR preset must exceed the CP Plus web player native-decode threshold with macroblock-aligned size');
   assert.equal(selectStream(inventory, '192.168.1.12', videoSettings('1080p', 15)), 'rtsp://192.168.1.12/main');
   assert.equal(selectStream(inventory, '192.168.1.12', { width: Number.MAX_SAFE_INTEGER, height: Number.MAX_SAFE_INTEGER }), 'rtsp://192.168.1.12/main');
 });

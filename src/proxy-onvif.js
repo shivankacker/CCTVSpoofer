@@ -12,16 +12,19 @@ const namespaces = {
 };
 const parser = new XMLParser({ ignoreAttributes: false, removeNSPrefix: true, parseTagValue: false });
 const builder = new XMLBuilder({ ignoreAttributes: false, suppressBooleanAttributes: false });
-const profileToken = 'processed';
+// NVRs map the second profile to their sub stream (used by multi-window live view) and ignore profiles
+// that share an encoder configuration, so each gets its own token; both describe the processed stream.
+const profileTokens = ['processed', 'processed-sub'];
+const encoderTokens = ['encoder', 'encoder-sub'];
 function mediaProfile(video) {
 const resolution = { 'tt:Width': video.width, 'tt:Height': video.height };
 const sourceConfig = {
-  '@_token': 'source-config', 'tt:Name': 'Processed source', 'tt:UseCount': 1,
+  '@_token': 'source-config', 'tt:Name': 'Processed source', 'tt:UseCount': profileTokens.length,
   'tt:SourceToken': 'source',
   'tt:Bounds': { '@_x': 0, '@_y': 0, '@_width': video.width, '@_height': video.height },
 };
-const encoderConfig = {
-  '@_token': 'encoder', 'tt:Name': 'Processed H264', 'tt:UseCount': 1,
+const encoderConfigs = encoderTokens.map((token, index) => ({
+  '@_token': token, 'tt:Name': `Processed H264${index ? ' sub' : ''}`, 'tt:UseCount': 1,
   'tt:Encoding': 'H264', 'tt:Resolution': resolution, 'tt:Quality': 5,
   'tt:RateControl': { 'tt:FrameRateLimit': video.fps, 'tt:EncodingInterval': 1, 'tt:BitrateLimit': video.bitrate },
   'tt:H264': { 'tt:GovLength': video.fps, 'tt:H264Profile': 'Main' },
@@ -30,12 +33,12 @@ const encoderConfig = {
     'tt:Port': 0, 'tt:TTL': 1, 'tt:AutoStart': false,
   },
   'tt:SessionTimeout': 'PT60S',
-};
-const profile = {
-  '@_token': profileToken, '@_fixed': true, 'tt:Name': `Processed ${video.height}p`,
-  'tt:VideoSourceConfiguration': sourceConfig, 'tt:VideoEncoderConfiguration': encoderConfig,
-};
-return { resolution, sourceConfig, encoderConfig, profile };
+}));
+const profiles = profileTokens.map((token, index) => ({
+  '@_token': token, '@_fixed': true, 'tt:Name': `Processed ${video.height}p${index ? ' sub' : ''}`,
+  'tt:VideoSourceConfiguration': sourceConfig, 'tt:VideoEncoderConfiguration': encoderConfigs[index],
+}));
+return { resolution, sourceConfig, encoderConfigs, profiles };
 }
 
 function envelope(body) {
@@ -78,7 +81,7 @@ function authorized(header, credentials, seen) {
 }
 
 export function createOnvifServer({ hostname, port, rtspPort, credentials, id = 'camera-1', getVideo = () => video }) {
-  let { resolution, sourceConfig, encoderConfig, profile } = mediaProfile(getVideo());
+  let { resolution, sourceConfig, encoderConfigs, profiles } = mediaProfile(getVideo());
   const seen = new Map();
   const endpoints = () => ({
     device: `http://${hostname}:${port || server.address().port}/onvif/device_service`,
@@ -119,13 +122,13 @@ export function createOnvifServer({ hostname, port, rtspPort, credentials, id = 
       'tt:Media': { 'tt:XAddr': endpoints().media,
         'tt:StreamingCapabilities': { 'tt:RTPMulticast': false, 'tt:RTP_TCP': true, 'tt:RTP_RTSP_TCP': true } },
     } }),
-    GetProfiles: () => ({ 'trt:Profiles': profile }),
-    GetProfile: () => ({ 'trt:Profile': profile }),
+    GetProfiles: () => ({ 'trt:Profiles': profiles }),
+    GetProfile: (args) => ({ 'trt:Profile': profiles.find((entry) => entry['@_token'] === args.ProfileToken) }),
     GetVideoSources: () => ({ 'trt:VideoSources': { '@_token': 'source', 'tt:Framerate': getVideo().fps, 'tt:Resolution': resolution } }),
     GetVideoSourceConfigurations: () => ({ 'trt:Configurations': sourceConfig }),
     GetVideoSourceConfiguration: () => ({ 'trt:Configuration': sourceConfig }),
-    GetVideoEncoderConfigurations: () => ({ 'trt:Configurations': encoderConfig }),
-    GetVideoEncoderConfiguration: () => ({ 'trt:Configuration': encoderConfig }),
+    GetVideoEncoderConfigurations: () => ({ 'trt:Configurations': encoderConfigs }),
+    GetVideoEncoderConfiguration: (args) => ({ 'trt:Configuration': encoderConfigs.find((entry) => entry['@_token'] === args.ConfigurationToken) }),
     GetStreamUri: () => ({ 'trt:MediaUri': {
       'tt:Uri': `rtsp://${hostname}:${rtspPort}/processed`,
       'tt:InvalidAfterConnect': false, 'tt:InvalidAfterReboot': false, 'tt:Timeout': 'PT0S',
@@ -170,10 +173,10 @@ export function createOnvifServer({ hostname, port, rtspPort, credentials, id = 
         return;
       }
       const args = document.Body[action];
-      const expectedToken = action.includes('Encoder') ? 'encoder' : 'source-config';
-      if ((['GetProfile', 'GetStreamUri'].includes(action) && args?.ProfileToken !== profileToken)
+      const expectedTokens = action.includes('Encoder') ? encoderTokens : ['source-config'];
+      if ((['GetProfile', 'GetStreamUri'].includes(action) && !profileTokens.includes(args?.ProfileToken))
         || (['GetVideoSourceConfiguration', 'GetVideoEncoderConfiguration'].includes(action)
-          && args?.ConfigurationToken !== expectedToken)) {
+          && !expectedTokens.includes(args?.ConfigurationToken))) {
         reply(500, fault('InvalidArgVal', 'Unknown profile or configuration token.'));
         return;
       }
@@ -182,8 +185,8 @@ export function createOnvifServer({ hostname, port, rtspPort, credentials, id = 
         reply(500, fault('InvalidArgVal', 'Only RTP-Unicast over RTSP/TCP is supported.'));
         return;
       }
-      ({ resolution, sourceConfig, encoderConfig, profile } = mediaProfile(getVideo()));
-      reply(200, envelope({ [`${prefix}:${action}Response`]: operations[action]() }));
+      ({ resolution, sourceConfig, encoderConfigs, profiles } = mediaProfile(getVideo()));
+      reply(200, envelope({ [`${prefix}:${action}Response`]: operations[action](args) }));
     } catch {
       if (!response.headersSent) reply(400, fault('InvalidArgVal', 'Invalid SOAP request.'));
     }
