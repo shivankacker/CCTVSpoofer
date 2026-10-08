@@ -16,6 +16,17 @@ import { createWebServer } from './proxy-web.js';
 
 const execute = promisify(execFile);
 
+// FFmpeg can hang without exiting after a network drop; kill it so the close handler retries.
+export function watchStall(child, lastActivity, { limit = 30000, interval = 5000, onStall = () => {} } = {}) {
+  const timer = setInterval(() => {
+    if (Date.now() - lastActivity() <= limit) return;
+    onStall();
+    child.kill('SIGKILL');
+  }, interval);
+  timer.unref?.();
+  child.once('close', () => clearInterval(timer));
+}
+
 export async function settingsStore(filename) {
   let saved = {};
   try {
@@ -261,6 +272,9 @@ export async function startProxy(options) {
       let announced = false;
       let progress = '';
       let lastFrame = 0;
+      const startedAt = Date.now();
+      watchStall(transcoder, () => Math.max(startedAt, lastFrameAt),
+        { onStall: () => log('Transcoder stalled; restarting.') });
       transcoder.stdout.on('data', (chunk) => {
         progress += chunk.toString();
         const lines = progress.split('\n');
@@ -300,6 +314,9 @@ export async function startProxy(options) {
       { stdio: ['ignore', 'pipe', 'ignore'] });
       let pending = '';
       let lastFrame = 0;
+      const startedAt = Date.now();
+      watchStall(preview, () => Math.max(startedAt, previewLastFrameAt),
+        { onStall: () => log('Original preview stalled; restarting.') });
       preview.stdout.on('data', (chunk) => {
         pending += chunk.toString();
         const lines = pending.split('\n');

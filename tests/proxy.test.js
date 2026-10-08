@@ -5,8 +5,8 @@ import { createOnvifServer } from '../src/proxy-onvif.js';
 import { call, environmentCredentials } from '../src/cameras.js';
 import onvif from 'onvif';
 import { createHash, randomBytes } from 'node:crypto';
-import { relayConfig, main, startProxy, settingsStore } from '../src/proxy.js';
-import { execFile } from 'node:child_process';
+import { relayConfig, main, startProxy, settingsStore, watchStall } from '../src/proxy.js';
+import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { mkdtemp, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -25,6 +25,20 @@ import { createRecordingLibrary, finalizeRecording } from '../src/proxy-recordin
 
 const execute = promisify(execFile);
 const createWebServer = (options) => authenticatedWebServer({ dashboardPassword: null, ...options });
+
+test('stall watchdog kills only a child that stops reporting activity', async () => {
+  const hung = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)']);
+  let stalled = 0;
+  const closed = new Promise((resolve) => hung.once('close', (code, signal) => resolve(signal)));
+  watchStall(hung, () => 0, { limit: 50, interval: 20, onStall: () => { stalled += 1; } });
+  assert.equal(await closed, 'SIGKILL');
+  assert.ok(stalled >= 1);
+
+  const busy = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 400)']);
+  const busyClosed = new Promise((resolve) => busy.once('close', (code, signal) => resolve([code, signal])));
+  watchStall(busy, () => Date.now(), { limit: 50, interval: 20 });
+  assert.deepEqual(await busyClosed, [0, null]);
+});
 
 test('dashboard password protects assets, APIs and media; sessions expire on logout and login is throttled', async (context) => {
   assert.throws(() => createWebServer({ dashboardPassword: '' }), /DASHBOARD_PASSWORD/);
